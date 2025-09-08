@@ -4,6 +4,12 @@ from logging.handlers import RotatingFileHandler
 import paramiko 
 
 logging_format= logging.Formatter('%(message)s')
+SSH_BANNER = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
+host_key = paramiko.RSAKey(filename="server_key")
+transport.add_server_key(host_key)
+
+
+
 
 funnel_logger=logging.getLogger("funnel logger")
 funnel_logger.setLevel(logging.INFO)
@@ -72,7 +78,25 @@ class Server(paramiko.ServerInterface):
     
     def check_channel_exec_request(self, channel, command):
         command=str(command)
-        return True   
+        return True 
+    
+def client_handle(client,addr,username,passowrd):
+      client_ip=addr[0]
+      print(f'[+] Connection from {client_ip}')
+      try:
+          transport=paramiko.Transport()
+          transport.local_version=SSH_BANNER
+          server=Server(client_ip=client_ip,input_username=username,input_password=passowrd)
+          transport.add_server_key(host_key)
+          transport.start_server(server=server)
+      except:
+          pass
+          
+        
+    
+          
+          
+      
     
                 
             
