@@ -2,14 +2,12 @@ import logging
 import socket
 from logging.handlers import RotatingFileHandler
 import paramiko 
+import threading 
+import sys
 
 logging_format= logging.Formatter('%(message)s')
 SSH_BANNER = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
-host_key = paramiko.RSAKey(filename="server_key")
-transport.add_server_key(host_key)
-
-
-
+host_key = paramiko.RSAKey(filename="server.key")
 
 funnel_logger=logging.getLogger("funnel logger")
 funnel_logger.setLevel(logging.INFO)
@@ -21,7 +19,7 @@ creds_logger=logging.getLogger("creds logger")
 creds_logger.setLevel(logging.INFO)
 creds_handler= RotatingFileHandler('cmd_audit.log',maxBytes=2000,backupCount=5)
 creds_handler.setFormatter(logging_format)
-creds_logger.addHandler(creds_logger)
+creds_logger.addHandler(creds_handler)
 
 def emulated_shell(channel,client_ip):
     channel.send(b'corporate-jumpbox2$')
@@ -37,7 +35,7 @@ def emulated_shell(channel,client_ip):
                 response=b'\nBye\n'
                 channel.close()
             elif command.strip()==b'pwd':
-                response=b'\n\usr\local\\' + b'\r\n'
+                response = b'\n\\usr\\local\\' + b'\r\n'
             elif command.strip()==b'whoami':
                 response=b'\n' + b'corpuser' + b'\r\n'
             elif command.strip()==b'ls':
@@ -52,6 +50,7 @@ def emulated_shell(channel,client_ip):
 class Server(paramiko.ServerInterface):
     def __init__(self,client_ip,input_username=None,input_password=None):
         self.client_ip=client_ip
+        self.event=threading.Event()
         self.input_username=input_username
         self.input_password=input_password
         
@@ -62,12 +61,12 @@ class Server(paramiko.ServerInterface):
     def get_allowed_auths(self):
         return 'password'
     
-    def check_auth_password(self,username,password):
-        if self.input_username is None and self.input_password is None:
-            if username=='username' and password=='password':
-                return paramiko.AUTH_SUCCESSFUL
-            else:
-                return paramiko.AUTH_FAILED
+    def check_auth_password(self, username, password):
+        if username == self.input_username and password == self.input_password:
+            return paramiko.AUTH_SUCCESSFUL
+        else:
+            return paramiko.AUTH_FAILED
+
     
     def check_channel_shell_request(self,channel):
         self.event.set()
@@ -82,15 +81,56 @@ class Server(paramiko.ServerInterface):
     
 def client_handle(client,addr,username,passowrd):
       client_ip=addr[0]
-      print(f'[+] Connection from {client_ip}')
+      print(f'Connection from {client_ip}')
       try:
-          transport=paramiko.Transport()
-          transport.local_version=SSH_BANNER
+          transport=paramiko.Transport(client )
           server=Server(client_ip=client_ip,input_username=username,input_password=passowrd)
           transport.add_server_key(host_key)
           transport.start_server(server=server)
-      except:
-          pass
+          channel=transport.accept(100)
+          if channel is None:
+              print("No channel was opened")
+          channel.send("Welcome to Ubuntu 20.04.6 LTS (GNU/Linux 5.4.0-144-generic x86_64)\r\n")
+          emulated_shell(channel,client_ip=client_ip )
+      except Exception as error:
+          print(error) 
+      finally:
+          try:
+              transport.close()
+          except Exception as error:
+              print(error)
+          client.close()
+
+def honeypot(username,password,port,address):
+    try:
+        sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        sock.bind((address,port))
+        sock.listen(100)
+        print(f'SSH Server is listening on port {port}')
+    except socket.error as e:
+        print(f'Socket error: {e}')
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error occoured: {e}")
+        sys.exit(1)
+    while True:
+        try:
+            client,addr=sock.accept()
+            ssh_honeypot_thread=threading.Thread(target=client_handle,args=(client,addr,username,password))
+            ssh_honeypot_thread.start()
+        except Exception as e:
+            print(e)
+honeypot('username','password',2222,'127.0.0.1')
+            
+        
+    
+    
+    
+              
+          
+          
+          
           
         
     
