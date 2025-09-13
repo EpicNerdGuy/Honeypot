@@ -21,30 +21,37 @@ creds_handler= RotatingFileHandler('cmd_audit.log',maxBytes=2000,backupCount=5)
 creds_handler.setFormatter(logging_format)
 creds_logger.addHandler(creds_handler)
 
-def emulated_shell(channel,client_ip):
+def emulated_shell(channel, client_ip):
     channel.send(b'corporate-jumpbox2$')
-    command= b""
+    command = b""
     while True:
-        char=channel.recv(1)
-        channel.send(char)
+        char = channel.recv(1)
         if not char:
             channel.close()
-        command+=char
-        if char==b'\r':
-            if command.strip()==b'exit':
-                response=b'\nBye\n'
+            break
+        channel.send(char)
+        command += char
+
+        if char == b'\r':
+            cmd = command.strip()
+
+            if cmd == b'exit':
+                channel.send(b'\nBye\n')
                 channel.close()
-            elif command.strip()==b'pwd':
-                response = b'\n\\usr\\local\\' + b'\r\n'
-            elif command.strip()==b'whoami':
-                response=b'\n' + b'corpuser' + b'\r\n'
-            elif command.strip()==b'ls':
-                response=b'\n' + b'jumpbox.conf1' + b'\r\n'
+                break
+            elif cmd == b'pwd':
+                response = b'\n/usr/local/\r\n'
+            elif cmd == b'whoami':
+                response = b'\ncorpuser\r\n'
+            elif cmd == b'ls':
+                response = b'\njumpbox.conf1\r\n'
             else:
-                response=b'sudo: command not found:' + b'\r\n'
-        channel.send(response)
-        channel.send(b'corporate-jumpbox2$')
-        command=b""
+                response = b'sudo: command not found\r\n'
+
+            channel.send(response)
+            channel.send(b'corporate-jumpbox2$')
+            command = b""
+
 
 # SSH server 
 class Server(paramiko.ServerInterface):
@@ -58,7 +65,7 @@ class Server(paramiko.ServerInterface):
         if kind=='session':
             return paramiko.OPEN_SUCCEEDED
         
-    def get_allowed_auths(self):
+    def get_allowed_auths(self,username):
         return 'password'
     
     def check_auth_password(self, username, password):
@@ -79,12 +86,12 @@ class Server(paramiko.ServerInterface):
         command=str(command)
         return True 
     
-def client_handle(client,addr,username,passowrd):
+def client_handle(client,addr,username,password):
       client_ip=addr[0]
       print(f'Connection from {client_ip}')
       try:
           transport=paramiko.Transport(client )
-          server=Server(client_ip=client_ip,input_username=username,input_password=passowrd)
+          server=Server(client_ip=client_ip,input_username=username,input_password=password)
           transport.add_server_key(host_key)
           transport.start_server(server=server)
           channel=transport.accept(100)
