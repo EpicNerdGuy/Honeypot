@@ -4,6 +4,7 @@ from logging.handlers import RotatingFileHandler
 import paramiko 
 import threading 
 import sys
+import signal
 
 logging_format= logging.Formatter('%(message)s')
 SSH_BANNER = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
@@ -21,6 +22,11 @@ creds_handler= RotatingFileHandler('cmd_audit.log',maxBytes=2000,backupCount=5)
 creds_handler.setFormatter(logging_format)
 creds_logger.addHandler(creds_handler)
 
+def signal_handler(sig,frame):
+    print("\n...Shutting Down Honeypot...\n")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT,signal_handler)
 def emulated_shell(channel, client_ip):
     channel.send(b'corporate-jumpbox2$')
     command = b""
@@ -34,19 +40,25 @@ def emulated_shell(channel, client_ip):
 
         if char == b'\r':
             cmd = command.strip()
-
+            creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
+                              
             if cmd == b'exit':
                 channel.send(b'\nBye\n')
                 channel.close()
+                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
                 break
             elif cmd == b'pwd':
                 response = b'\n/usr/local/\r\n'
+                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
             elif cmd == b'whoami':
                 response = b'\ncorpuser\r\n'
+                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
             elif cmd == b'ls':
                 response = b'\njumpbox.conf1\r\n'
+                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
             else:
                 response = b'sudo: command not found\r\n'
+                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
 
             channel.send(response)
             channel.send(b'corporate-jumpbox2$')
@@ -69,6 +81,8 @@ class Server(paramiko.ServerInterface):
         return 'password'
     
     def check_auth_password(self, username, password):
+        funnel_logger.info(f'Client {self.client_ip} attempted connection with'+f'username: {username},'+f'password: {password}')
+        creds_logger.info(f'{self.client_ip},{username},{password}')
         if username == self.input_username and password == self.input_password:
             return paramiko.AUTH_SUCCESSFUL
         else:
@@ -112,6 +126,7 @@ def honeypot(username,password,port,address):
     try:
         sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        sock.settimeout(1)
         sock.bind((address,port))
         sock.listen(100)
         print(f'SSH Server is listening on port {port}')
@@ -126,9 +141,11 @@ def honeypot(username,password,port,address):
             client,addr=sock.accept()
             ssh_honeypot_thread=threading.Thread(target=client_handle,args=(client,addr,username,password))
             ssh_honeypot_thread.start()
+        except socket.timeout:
+            continue
         except Exception as e:
             print(e)
-honeypot('username','password',2222,'127.0.0.1')
+honeypot('username=None','password=None',2222,'127.0.0.1')
             
         
     
