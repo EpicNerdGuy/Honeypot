@@ -1,103 +1,96 @@
----
+# SSH Honeypot (Corporate Jumpbox Emulation)
 
-# SSH Honeypot
-
-This project is a simple **SSH honeypot** built in Python using **Paramiko**.
-It emulates a fake SSH server, accepts connections, captures credentials, and provides a basic shell environment to trick attackers into interacting with it.
-All activity is logged for later analysis.
+A lightweight SSH honeypot that emulates a corporate jumpbox shell to collect attacker credentials and commands. Designed for learning, CTF practice, and low-interaction telemetry, not for production exposure of secrets.
 
 ---
 
 ## Features
 
-* **Custom SSH Banner** → Pretends to be a real OpenSSH server (`SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1`).
-* **Fake Shell Emulation** → Supports simple commands:
-
-  * `pwd`
-  * `whoami`
-  * `ls`
-  * `exit`
-  * Any other command returns a fake `sudo: command not found`.
-* **Credential Capture** → Logs usernames and passwords attempted.
-* **Rotating Logs** →
-
-  * `audit.log`: Funnel connection logs.
-  * `cmd_audit.log`: Captured credentials and commands.
-* **Paramiko Transport** → Handles authentication, channels, and key exchange.
+* Accepts SSH connections and logs attempted usernames and passwords.
+* Emulated interactive shell with basic fake commands (`ls`, `pwd`, `whoami`, `cd`, `exit`).
+* Command and credential logging with rotating logs (`audit.log`, `cmd_audit.log`).
+* Robust terminal behavior: backspace, Ctrl-C, Ctrl-D, proper prompts and line editing.
+* Non-blocking I/O and graceful session teardown for stability.
+* Web-based SSH monitoring UI (coming soon)
 
 ---
 
-## Project Structure
+## Roadmap / Coming soon
 
-```
-.
-├── honeypot.py        # main honeypot script
-├── server_key         # RSA private key for the fake SSH server
-├── audit.log          # funnel logs (rotating)
-├── cmd_audit.log      # credentials + command logs (rotating)
-└── README.md          # project documentation
-```
+* **Web-based SSH UI** - a browser-accessible frontend for monitoring sessions and replaying command logs (coming soon).
+* Per-directory fake file trees and richer command emulation (`cat`, `ps`, simple `bash`-like responses).
+* Optional telemetry export (JSON) and integration with ELK / Grafana dashboards.
 
 ---
 
-## ⚙️ Requirements
+## Quick Start
 
-* Python 3.x
-* Paramiko (`pip install paramiko`)
+> **Requirements:** Python 3.10+, `paramiko` installed, and a generated `server.key` RSA host key present in the project folder.
 
----
-
-## 🚀 Usage
-
-1. **Generate a server key** if you don’t have one:
-
-   ```bash
-   ssh-keygen -t rsa -b 2048 -f server_key
-   ```
-2. **Run the honeypot:**
-
-   ```bash
-   python3 honeypot.py
-   ```
-3. **Connect to it** (from attacker’s perspective):
-
-   ```bash
-   ssh user@<honeypot-ip> -p 22
-   ```
-4. The honeypot logs all activity in:
-
-   * `audit.log`
-   * `cmd_audit.log`
-
----
-
-## 📝 Example Interaction
-
-Attacker runs:
+1. Install dependencies:
 
 ```bash
-ssh username@honeypot
+pip install -r requirements.txt
+# or
+pip install paramiko
 ```
 
-Inside fake shell:
+2. Generate an RSA host key (if you don't already have one):
 
+```bash
+ssh-keygen -t rsa -b 2048 -f server.key -N ""
 ```
-corporate-jumpbox2$ pwd
-\usr\local\
-corporate-jumpbox2$ whoami
-corpuser
-corporate-jumpbox2$ ls
-jumpbox.conf1
-corporate-jumpbox2$ exit
-Bye
+
+3. Make sure the private key is ignored by git (the project provides a `.gitignore`):
+
+```bash
+# verify .gitignore contains server.key
+git check-ignore -v server.key
 ```
+
+4. Run the honeypot (example on localhost port 2222):
+
+```bash
+python ssh_honeypot.py
+```
+
+5. From another terminal test a connection:
+
+```bash
+ssh -p 2222 user@127.0.0.1
+```
+
+The server will accept the connection and log any attempted credentials and commands.
 
 ---
 
-## Disclaimer
+## Logs & Files
 
-This project is for **educational and research purposes only**.
-Do not expose it to the internet without proper isolation — attackers may use it for malicious purposes.
-Use at your own risk.
+* `audit.log` - records connection attempts (client IP, username, password). Rotates after configured size.
+* `cmd_audit.log` - records commands executed in the emulated shell.
+* `server.key` - the SSH host private key (must **never** be committed to git).
+* `server.key.pub` - public host key (optional to keep tracked or ignore).
 
+**Important:** If `server.key` was ever pushed to a remote repository, assume it is compromised — rotate/regenerate the key immediately.
+
+---
+
+## Configuration
+
+* `ssh_honeypot.py` arguments: `honeypot(username, password, port, address)` — the code supports accepting all credentials by default and logs them. Adjust behavior in `check_auth_password` to only accept specific pairs if you prefer.
+* Logging format and rotation are defined in the script using Python's `logging` and `RotatingFileHandler`.
+
+---
+
+## Security Considerations
+
+* This is a low-interaction honeypot intended for research and learning. Do **not** run it on a public, production-facing IP without isolating it behind proper monitoring and containment.
+* Always ignore and never commit private keys. Use `.gitignore` and `git rm --cached` to stop tracking sensitive files.
+* If a private key is accidentally pushed, rotate the key and, if necessary, rewrite history with tools like `git filter-repo` or BFG.
+
+---
+
+## Contributing
+
+PRs welcome. If you add features that increase interaction fidelity (e.g., `cat` or `scp` emulation), please add tests or record sample telemetry to the `examples/` folder.
 
