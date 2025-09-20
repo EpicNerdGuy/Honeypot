@@ -6,7 +6,7 @@ import threading
 import sys
 import signal
 
-logging_format= logging.Formatter('%(message)s')
+logging_format= logging.Formatter('%(asctime)s-%(message)s')
 SSH_BANNER = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
 host_key = paramiko.RSAKey(filename="server.key")
 
@@ -28,41 +28,106 @@ def signal_handler(sig,frame):
 
 signal.signal(signal.SIGINT,signal_handler)
 def emulated_shell(channel, client_ip):
-    channel.send(b'corporate-jumpbox2$')
-    command = b""
+    import socket  # needed for socket.timeout
+    channel.settimeout(0.5)                # don't block forever
+    prompt = b'corporate-jumpbox2$ '
+    line_buf = bytearray()
+    channel.send(prompt)
+
     while True:
-        char = channel.recv(1)
-        if not char:
-            channel.close()
-            break
-        channel.send(char)
-        command += char
-
-        if char == b'\r':
-            cmd = command.strip()
-            creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
-                              
-            if cmd == b'exit':
-                channel.send(b'\nBye\n')
-                channel.close()
-                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
+        try:
+            data = channel.recv(1024)
+            if not data:
+        
+                try:
+                    channel.close()
+                except Exception:
+                    pass
                 break
-            elif cmd == b'pwd':
-                response = b'\n/usr/local/\r\n'
-                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
-            elif cmd == b'whoami':
-                response = b'\ncorpuser\r\n'
-                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
-            elif cmd == b'ls':
-                response = b'\njumpbox.conf1\r\n'
-                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
-            else:
-                response = b'sudo: command not found\r\n'
-                creds_logger.info(f'Command {command.strip()}'+f'from {client_ip}')
+        except socket.timeout:
+           
+            continue
+        except Exception:
+       
+            try:
+                channel.close()
+            except Exception:
+                pass
+            break
 
-            channel.send(response)
-            channel.send(b'corporate-jumpbox2$')
-            command = b""
+     
+        for byte in data:
+            b = bytes([byte])
+
+         
+            if byte == 3:
+                channel.send(b'^C\r\n')
+                line_buf.clear()
+                channel.send(prompt)
+                continue
+
+            
+            if byte == 4:
+                channel.send(b'\r\nBye\r\n')
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+                return
+
+          
+            if byte in (8, 127):
+                if len(line_buf) > 0:
+                   
+                    line_buf.pop()
+                    channel.send(b'\b \b')
+               
+                continue
+
+           
+            if byte in (10, 13):
+                # move cursor to new line first (echo)
+                channel.send(b'\r\n')
+                cmd = bytes(line_buf).strip()
+             
+                cmd_str = cmd.decode('utf-8', errors='ignore')
+                creds_logger.info(f'Command {cmd_str} from {client_ip}')
+
+                # dispatch fake commands
+                if cmd == b'exit':
+                    channel.send(b'Bye\r\n')
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
+                    return
+                elif cmd == b'pwd':
+                    channel.send(b'/usr/local/\r\n')
+                elif cmd == b'whoami':
+                    channel.send(b'corpuser\r\n')
+                elif cmd == b'ls':
+                    channel.send(b'jumpbox.conf1\r\n')
+                elif cmd.startswith(b'cd'):
+                  
+                    channel.send(b'')
+                elif cmd == b'':
+                   
+                    pass
+                else:
+                    channel.send(b'command not found\r\n')
+
+           
+                channel.send(prompt)
+                line_buf.clear()
+                continue
+
+            if 32 <= byte <= 126:
+                channel.send(b)
+                line_buf.append(byte)
+            else:
+                pass
+
+
 
 
 # SSH server 
@@ -83,10 +148,8 @@ class Server(paramiko.ServerInterface):
     def check_auth_password(self, username, password):
         funnel_logger.info(f'Client {self.client_ip} attempted connection with'+f'username: {username},'+f'password: {password}')
         creds_logger.info(f'{self.client_ip},{username},{password}')
-        if username == self.input_username and password == self.input_password:
-            return paramiko.AUTH_SUCCESSFUL
-        else:
-            return paramiko.AUTH_FAILED
+        return paramiko.AUTH_SUCCESSFUL
+        
 
     
     def check_channel_shell_request(self,channel):
@@ -143,9 +206,9 @@ def honeypot(username,password,port,address):
             ssh_honeypot_thread.start()
         except socket.timeout:
             continue
-        except Exception as e:
-            print(e)
-honeypot('username=None','password=None',2222,'127.0.0.1')
+        except Exception:
+            break
+honeypot(None,None,2222,'127.0.0.1')
             
         
     
